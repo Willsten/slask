@@ -115,22 +115,32 @@ def write_to_file(segments, remaining_pairs):
             f.write(f"Cell Pair: {pair.cell1.number}-{pair.cell2.number}\n")
 
 def main():
-    file_path = input("Enter the path to the CSV file: ").strip('"')
-    num_segments = int(input("Enter the number of segments: "))
-    num_pairs_per_segment = int(input("Enter the number of cell pairs per segment: "))
-    output_choice = input("Print to terminal (T) or save to a text file (F)? ").strip().upper()
+    print("Ange A om du vi sortera på Melastas cellpar och sortering på alla egenskaper lika")
+    print("Ange B om du vill göra egen cell parning baserat lägsta resistans skillnad och att segment vis kommer resistansen längre fram")
+    print("Ang C om du vill gör egen cellparning med högsta och lägsta kapasitans och att segment vis kommer resistansen längre fram")
+    print("Ange D om vill göra egenparning på ")
 
-    cells = read_csv_file(file_path)
-    high_capacity_cells, extra_cells = pair_cells_by_similarity(cells, num_segments * num_pairs_per_segment)
-    segments = create_segments(high_capacity_cells, num_segments, num_pairs_per_segment)
-    remaining_pairs = [pair for pair in extra_cells]
+    val = input("=")
+    if val == "A":
+        file_path = input("Enter the path to the CSV file: ").strip('"')
+        num_segments = int(input("Enter the number of segments: "))
+        num_pairs_per_segment = int(input("Enter the number of cell pairs per segment: "))
+        output_choice = input("Print to terminal (T) or save to a text file (F)? ").strip().upper()
 
-    if output_choice == 'T':
-        print_segments(segments)
+        cells = read_csv_file(file_path)
+        high_capacity_cells, extra_cells = pair_cells_by_similarity(cells, num_segments * num_pairs_per_segment)
+        segments = create_segments(high_capacity_cells, num_segments, num_pairs_per_segment)
+        remaining_pairs = [pair for pair in extra_cells]
+
+        if output_choice == 'T':
+            print_segments(segments)
+        else:
+            write_to_file(segments, remaining_pairs)
+            print("Data has been saved in output.txt.")
     else:
-        write_to_file(segments, remaining_pairs)
-        print("Data has been saved in output.txt.")
-
+        main()
 
 if __name__ == "__main__":
     main()
+
+#Emil vill att de ska skrivas ut i excel också
