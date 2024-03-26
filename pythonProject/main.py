@@ -1,4 +1,5 @@
 import pandas as pd
+import random
 class Cell:
     def __init__(self, number, voltage, ir, capacity):
         self.number = number
@@ -92,8 +93,6 @@ def pair_cells_on_ir(cells):
             paired_cells.add(cell_pair.cell2)
     return cell_pairs
 
-
-
 def match_cell_pairs_based_on(cells, num_pairs):
     cell_pairs = pair_cells_on_ir(cells)
     if not cell_pairs:
@@ -103,6 +102,53 @@ def match_cell_pairs_based_on(cells, num_pairs):
     extra_cells = cell_pairs[num_pairs:]  # Include remaining pairs in the extra cells list
     return high_resistance_cells, extra_cells
 
+
+def pair_cells_based_on_ir(cells):
+    cell_pairs = []
+    paired_cells = set()  # Keep track of paired cells
+
+    for i, cell1 in enumerate(cells):
+        if cell1 in paired_cells:  # Skip already paired cells
+            continue
+
+        min_difference = float('inf')
+        best_pair = None
+
+        for j, cell2 in enumerate(cells):
+            if i != j and cell2 not in paired_cells:  # Check if cell2 is not already paired
+                difference = abs(cell1.ir - cell2.ir)
+                if difference < min_difference:
+                    min_difference = difference
+                    best_pair = CellPair(cell1, cell2)
+
+        if best_pair is not None:
+            cell_pairs.append(best_pair)
+            paired_cells.add(cell1)
+            paired_cells.add(best_pair.cell2)
+
+    return cell_pairs
+
+
+def create_segments_based_on_ir(cell_pairs, num_segments, num_pairs_per_segment):
+    best_segments = None
+    best_total_resistance = float('inf')
+
+    for _ in range(10000):  # Run multiple iterations to find the best combination
+        shuffled_pairs = random.sample(cell_pairs, len(cell_pairs))  # Shuffle the cell pairs
+        segments = []
+
+        for i in range(0, len(shuffled_pairs), num_pairs_per_segment):
+            segment_pairs = shuffled_pairs[i:i + num_pairs_per_segment]
+            segment = Segment(segment_pairs)
+            segments.append(segment)
+
+        total_resistance = sum(segment.segment_total_resistance for segment in segments)
+
+        if total_resistance < best_total_resistance:
+            best_total_resistance = total_resistance
+            best_segments = segments
+
+    return best_segments
 
 def create_segments(cell_pairs, num_segments, num_pairs_per_segment):
     segments = []
@@ -175,6 +221,15 @@ def main():
                 print_segments(segments)
             else:
                 write_to_file(segments, low_ir)  # Pass low_ir for remaining pairs
+                print("Data has been saved in output.txt.")
+        elif val == "C":
+            high_ir_pairs = pair_cells_based_on_ir(cells)
+            segments = create_segments_based_on_ir(high_ir_pairs, num_segments, num_pairs_per_segment)
+            output_choice = input("Print to terminal (T) or save to a text file (F)? ").strip().upper()
+            if output_choice == 'T':
+                print_segments(segments)
+            else:
+                write_to_file(segments, [])  # No remaining pairs for option C
                 print("Data has been saved in output.txt.")
         elif val =="Q":
             break
