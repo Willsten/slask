@@ -37,13 +37,17 @@ class Segment:
         self.segment_total_capacity = self.calculate_segment_total_capacity()
 
     def calculate_segment_total_capacity(self):
-        total_capacity = sum(pair.total_capacity for pair in self.cell_pairs)
-        return total_capacity
+        capacity = 0
+        for pair in self.cell_pairs:
+            if pair.total_capacity > capacity:
+                capacity = pair.total_capacity
+            else:
+                continue
+        return capacity
 
     def calculate_segment_total_resistance(self):
         total_resistance = sum(pair.total_resistance for pair in self.cell_pairs)
         return total_resistance
-
 
 def read_csv_file(file_path):
     df = pd.read_csv(file_path, usecols=[1, 4, 5, 6], skiprows=1)
@@ -53,23 +57,51 @@ def read_csv_file(file_path):
         cells.append(cell)
     return cells
 
-
-def pair_cells(cells):
+def pair_cells_melasta(cells):
     cell_pairs = []
     for i in range(0, len(cells), 2):
         if i + 1 < len(cells):
             pair = CellPair(cells[i], cells[i + 1])
             cell_pairs.append(pair)
     return cell_pairs
-
-
 def pair_cells_by_similarity(cells, num_pairs):
-    cell_pairs = pair_cells(cells)
+    cell_pairs = pair_cells_melasta(cells)
     cell_pairs.sort(key=lambda x: x.total_capacity)
     high_capacity_cells = cell_pairs[:num_pairs]
     extra_cells = cell_pairs[num_pairs:]
     high_capacity_cells.sort(key=lambda x: x.similarity_score)
     return high_capacity_cells, extra_cells
+
+def pair_cells_on_ir(cells):
+    cell_pairs = []
+    paired_cells = set()  # Keep track of paired cells
+    for i, cell1 in enumerate(cells):
+        if cell1 in paired_cells:  # Skip already paired cells
+            continue
+        dif = float("inf")
+        cell_pair = None
+        for j, cell2 in enumerate(cells):
+            if i != j and cell2 not in paired_cells:  # Check if cell2 is not already paired
+                d = abs(cell1.ir - cell2.ir)
+                if d < dif:
+                    dif = d
+                    cell_pair = CellPair(cell1, cell2)
+        if cell_pair is not None:
+            cell_pairs.append(cell_pair)
+            paired_cells.add(cell1)
+            paired_cells.add(cell_pair.cell2)
+    return cell_pairs
+
+
+
+def match_cell_pairs_based_on(cells, num_pairs):
+    cell_pairs = pair_cells_on_ir(cells)
+    if not cell_pairs:
+        return []  # Return empty list if no cell pairs are generated
+    cell_pairs.sort(key=lambda x: x.total_resistance)
+    high_resistance_cells = cell_pairs[:num_pairs]
+    extra_cells = cell_pairs[num_pairs:]  # Include remaining pairs in the extra cells list
+    return high_resistance_cells, extra_cells
 
 
 def create_segments(cell_pairs, num_segments, num_pairs_per_segment):
@@ -94,7 +126,6 @@ def print_segments(segments):
         print("-" * 100)  # Streckad linje mellan segmenten
     print()
 
-
 def write_to_file(segments, remaining_pairs):
     with open("output.txt", "w") as f:
         f.write("Segments:\n")
@@ -115,32 +146,39 @@ def write_to_file(segments, remaining_pairs):
             f.write(f"Cell Pair: {pair.cell1.number}-{pair.cell2.number}\n")
 
 def main():
-    print("Ange A om du vi sortera på Melastas cellpar och sortering på alla egenskaper lika")
-    print("Ange B om du vill göra egen cell parning baserat lägsta resistans skillnad och att segment vis kommer resistansen längre fram")
-    print("Ang C om du vill gör egen cellparning med högsta och lägsta kapasitans och att segment vis kommer resistansen längre fram")
-    print("Ange D om vill göra egenparning på ")
-
-    val = input("=")
-    if val == "A":
-        file_path = input("Enter the path to the CSV file: ").strip('"')
-        num_segments = int(input("Enter the number of segments: "))
-        num_pairs_per_segment = int(input("Enter the number of cell pairs per segment: "))
-        output_choice = input("Print to terminal (T) or save to a text file (F)? ").strip().upper()
-
-        cells = read_csv_file(file_path)
-        high_capacity_cells, extra_cells = pair_cells_by_similarity(cells, num_segments * num_pairs_per_segment)
-        segments = create_segments(high_capacity_cells, num_segments, num_pairs_per_segment)
-        remaining_pairs = [pair for pair in extra_cells]
-
-        if output_choice == 'T':
-            print_segments(segments)
-        else:
-            write_to_file(segments, remaining_pairs)
-            print("Data has been saved in output.txt.")
-    else:
-        main()
+    file_path = input("Enter the path to the CSV file: ").strip('"')
+    cells = read_csv_file(file_path)
+    num_segments = int(input("Enter the number of segments: "))
+    num_pairs_per_segment = int(input("Enter the number of cell pairs per segment: "))
+    while True:
+        print("Ange A om du vill sortera på Melastas cellpar och sortering på alla egenskaper lika")
+        print("Ange B om du vill göra egen cell parning baserat lägsta resistans skillnad och att segment vis kommer resistansen längre fram")
+        print("Ange C om du vill gör egen cellparning med högsta och lägsta kapasitans och att segment vis kommer resistansen längre fram")
+        print("Ange D om vill göra egenparning på ")
+        print("Ange Q för att avsluta")
+        val = input("=").upper()
+        if val == "A":
+            high_capacity_cells, extra_cells = pair_cells_by_similarity(cells, num_segments * num_pairs_per_segment)
+            segments = create_segments(high_capacity_cells, num_segments, num_pairs_per_segment)
+            remaining_pairs = [pair for pair in extra_cells]
+            output_choice = input("Print to terminal (T) or save to a text file (F)? ").strip().upper()
+            if output_choice == 'T':
+                print_segments(segments)
+            else:
+                write_to_file(segments, remaining_pairs)
+                print("Data has been saved in output.txt.")
+        elif val == "B":
+            high_ir_pairs, low_ir = match_cell_pairs_based_on(cells, num_pairs_per_segment)
+            segments = create_segments(high_ir_pairs + low_ir, num_segments, num_pairs_per_segment)
+            output_choice = input("Print to terminal (T) or save to a text file (F)? ").strip().upper()
+            if output_choice == 'T':
+                print_segments(segments)
+            else:
+                write_to_file(segments, low_ir)  # Pass low_ir for remaining pairs
+                print("Data has been saved in output.txt.")
+        elif val =="Q":
+            break
 
 if __name__ == "__main__":
     main()
-
 #Emil vill att de ska skrivas ut i excel också
