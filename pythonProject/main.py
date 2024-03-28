@@ -14,7 +14,7 @@ class CellPair:
         self.similarity_score = self.calculate_similarity()
         self.total_capacity = self.total_capacity()
         self.total_resistance = self.total_resistance()
-
+        self.diff_voltage = self.diff_voltage()
     def calculate_similarity(self):
         voltage_diff = abs(self.cell1.voltage - self.cell2.voltage)
         resistance_diff = abs(self.cell1.ir - self.cell2.ir)
@@ -31,15 +31,19 @@ class CellPair:
             total = 1 / ((1 / self.cell1.ir) + (1 / self.cell2.ir))
         return total
 
+    def diff_voltage(self):
+        voltage_diff = abs(self.cell1.voltage - self.cell2.voltage)
+        return voltage_diff
+
 class Segment:
     def __init__(self, cell_pairs):
         self.cell_pairs = cell_pairs
         self.segment_total_resistance = self.calculate_segment_total_resistance()
         self.segment_total_capacity = self.calculate_segment_total_capacity()
         self.average_ir_difference = self.calculate_average_ir_difference()
-
+        self.max_voltage_difference = self.max_voltage_difference()
     def calculate_segment_total_capacity(self):
-        capacity = 100000000000
+        capacity = float("inf")
         for pair in self.cell_pairs:
             if pair.total_capacity < capacity:
                 capacity = pair.total_capacity
@@ -57,6 +61,9 @@ class Segment:
         total_ir_difference = sum(
             abs(pair.cell1.ir - pair.cell2.ir) for pair in self.cell_pairs if pair.cell1 and pair.cell2)
         return total_ir_difference / len(self.cell_pairs)
+
+    def max_voltage_difference(self):
+        return max(pair.diff_voltage for pair in self.cell_pairs) if self.cell_pairs else 0
 
 def read_csv_file(file_path):
     df = pd.read_csv(file_path, usecols=[1, 4, 5, 6], skiprows=1)
@@ -110,7 +117,6 @@ def pair_extra_cells(cells):
 
     return paired_cells
 
-
 def pair_cells_melasta(cells):
     cell_pairs = []
     for i in range(0, len(cells), 2):
@@ -158,14 +164,14 @@ def pair_cells_based_on_ir(cells):
         if cell1 in paired_cells:  # Skip already paired cells
             continue
 
-        min_difference = float('inf')
+        min_difference_ir = float('inf')
         best_pair = None
-
         for j, cell2 in enumerate(cells):
             if i != j and cell2 not in paired_cells:  # Check if cell2 is not already paired
-                difference = abs(cell1.ir - cell2.ir)
-                if difference < min_difference:
-                    min_difference = difference
+                difference_ir = abs(cell1.ir - cell2.ir)
+                difference_mV = abs(cell1.voltage-cell2.voltage)
+                if difference_ir < min_difference_ir and difference_mV < 4:
+                    min_difference_ir = difference_ir
                     best_pair = CellPair(cell1, cell2)
 
         if best_pair is not None:
@@ -199,6 +205,7 @@ def create_segments_based_on_resistance(cell_pairs, num_pairs_per_segment):
 def create_segments_based_on_ir(cell_pairs, num_pairs_per_segment):
     best_segments = None
     best_total_resistance = float('inf')
+    V_diff = float("inf")
 
     for _ in range(10000):  # Run multiple iterations to find the best combination
         shuffled_pairs = random.sample(cell_pairs, len(cell_pairs))  # Shuffle the cell pairs
@@ -210,8 +217,9 @@ def create_segments_based_on_ir(cell_pairs, num_pairs_per_segment):
             segments.append(segment)
 
         total_resistance = sum(segment.segment_total_resistance for segment in segments)
+        max_voltage_diff = max(segment.max_voltage_difference for segment in segments)
 
-        if total_resistance < best_total_resistance:
+        if total_resistance < best_total_resistance and max_voltage_diff < V_diff:
             best_total_resistance = total_resistance
             best_segments = segments
 
@@ -223,10 +231,15 @@ def print_segments(segments):
     for idx, segment in enumerate(segments):
         print(f"Segment {idx + 1} (Average IR Difference: {segment.average_ir_difference:.2f}):")
         for pair in segment.cell_pairs:
-            print("{:<10} {:<30} {:<30} {:<30}".format(idx + 1,
-                                                        f"{pair.cell1.number}-{pair.cell2.number}",
-                                                        f"Voltage (mV): {pair.cell1.voltage}, IR (mOhm): {pair.cell1.ir}, Capacity (mAh): {pair.cell1.capacity}",
-                                                        f"Voltage (mV): {pair.cell2.voltage}, IR (mOhm): {pair.cell2.ir}, Capacity (mAh): {pair.cell2.capacity}"))
+            # Ensure IR values are formatted to take up exactly 3 characters
+            cell1_ir_formatted = f"{pair.cell1.ir:4}"
+            cell2_ir_formatted = f"{pair.cell2.ir:4}"
+
+            print("{:<10} {:<30} {:<30} {:<30}".format(
+                idx + 1,
+                f"{pair.cell1.number}-{pair.cell2.number}",
+                f"Voltage (mV): {pair.cell1.voltage}, IR (mOhm): {cell1_ir_formatted}, Capacity (mAh): {pair.cell1.capacity}",
+                f"Voltage (mV): {pair.cell2.voltage}, IR (mOhm): {cell2_ir_formatted}, Capacity (mAh): {pair.cell2.capacity}, diff mV: {pair.diff_voltage}, combinedIR:{pair.total_resistance}"))
         print("{:<10} {:<30} {:<30} {:<30}".format("", "Total Resistance:",
                                                     f"{segment.segment_total_resistance:.2f} mOhm", ""))
         print("{:<10} {:<30} {:<30} {:<30}".format("", "Total Capacity:", f"{segment.segment_total_capacity} mAh", ""))
@@ -290,6 +303,7 @@ def main():
     num_segments = 6 #int(input("Enter the number of segments: "))
     num_pairs_per_segment = 21 #int(input("Enter the number of cell pairs per segment: "))
     cells, extra_cells = remove_low_capacity_cells(cells, num_segments, num_pairs_per_segment)
+
     while True:
         print("Ange A om du vill sortera på Melastas cellpar och sortering på alla egenskaper lika")
         print("Ange B om du vill göra egen cell parning baserat lägsta resistans skillnad och att segment vis kommer resistansen längre fram")
@@ -329,9 +343,9 @@ def main():
                 print("Data has been saved in output.txt.")
         elif val == "C":
             high_ir_pairs = pair_cells_based_on_ir(cells)
-            segments = create_segments_based_on_ir(high_ir_pairs, num_pairs_per_segment)
+            segments = create_segments_based_on_resistance(high_ir_pairs, num_pairs_per_segment)
             paired_extra_cells = pair_extra_cells(extra_cells)
-            spairssegment = create_segments_based_on_ir(paired_extra_cells, num_pairs_per_segment)
+            spairssegment = create_segments_based_on_resistance(paired_extra_cells, num_pairs_per_segment)
             output_choice = input("Print to terminal (T) or save to a text file (F)? or E for excel or S for all").strip().upper()
             if output_choice == 'T':
                 print_segments(segments)
