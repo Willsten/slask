@@ -7,12 +7,16 @@ class Cell:
         self.ir = ir
         self.capacity = capacity
 class CellPair:
+    pair_number_counter = 0
     def __init__(self, cell1, cell2):
+        CellPair.pair_number_counter += 1
+        self.pair_number = CellPair.pair_number_counter
         self.cell1 = cell1
         self.cell2 = cell2
         self.similarity_score = self.calculate_similarity()
         self.total_capacity = self.total_capacity()
         self.total_resistance = self.total_resistance()
+        self.total_voltage = self.total_voltage()
         self.diff_voltage = self.diff_voltage()
     def calculate_similarity(self):
         voltage_diff = abs(self.cell1.voltage - self.cell2.voltage)
@@ -29,6 +33,12 @@ class CellPair:
         if self.cell1 and self.cell2 is not None:
             total = 1 / ((1 / self.cell1.ir) + (1 / self.cell2.ir))
         return total
+    def total_voltage(self):
+        if self.cell1.voltage < self.cell2.voltage:
+            total_voltage= self.cell1.voltage
+        else:
+            total_voltage= self.cell2.voltage
+        return total_voltage
 
     def diff_voltage(self):
         voltage_diff = abs(self.cell1.voltage - self.cell2.voltage)
@@ -200,41 +210,84 @@ def create_segments_sorted_by_ir(cell_pairs, num_pairs_per_segment):
 
     return segments
 
+def calculate_mean_attributes(cell_pairs):
+    total_resistance_mean = sum(pair.total_resistance for pair in cell_pairs) / len(cell_pairs)
+    total_voltage_mean = sum(pair.total_voltage for pair in cell_pairs) / len(cell_pairs)
+    total_capacity_mean = sum(pair.total_capacity for pair in cell_pairs) / len(cell_pairs)
+    return total_resistance_mean, total_voltage_mean, total_capacity_mean
+
+def score_cell_pairs(cell_pairs, means):
+    scores = []
+    for pair in cell_pairs:
+        score = abs(pair.total_resistance - means[0]) + abs(pair.total_voltage - means[1]) + abs(
+            pair.total_capacity - means[2])
+        scores.append((score, pair))
+    return scores
+
+def create_segments_with_diversity_and_high_ir(cell_pairs, num_pairs_per_segment):
+    pairs_sorted_on_ir = sorted(cell_pairs, key=lambda x: x.total_resistance, reverse=True)
+
+    segments = []
+    for i in range(0, len(cell_pairs), num_pairs_per_segment):
+        segment_pairs = cell_pairs[i:i + num_pairs_per_segment]
+        means = calculate_mean_attributes(segment_pairs)
+        scored_pairs = score_cell_pairs(segment_pairs, means)
+        scored_pairs.sort(key=lambda x: x[0], reverse=True)
+        selected_pairs = [pair for _, pair in scored_pairs[:num_pairs_per_segment]]
+        num_insertions = min(len(selected_pairs) // 3, len(pairs_sorted_on_ir))
+        for j in range(num_insertions):
+            insert_position = (j + 1) * 4 - 1
+            if insert_position < len(selected_pairs):
+                high_ir_pair = pairs_sorted_on_ir.pop(0)
+                selected_pairs.insert(insert_position, high_ir_pair)
+
+        segment = Segment(selected_pairs)
+        segments.append(segment)
+
+    return segments
+
 def print_segments(segments):
-    pair_header = "{:<10} {:<15} {:<15} {:<10} {:<15} {:<15} {:<15} {:<15} {:<25} {:<15} {:<15}".format(
-        "Segment", "Cell Pair", "Cell 1 Voltage", "Cell 1 IR",
+    pair_header = "{:<10} {:<10} {:<15} {:<15} {:<15} {:<10} {:<15} {:<15} {:<15} {:<25} {:<15} {:<15}".format(
+        "Segment", "Pair Number", "Cell Pair", "Cell 1 Voltage", "Cell 1 IR",
         "Cell 1 Capacity", "Cell 2 Voltage", "Cell 2 IR",
         "Cell 2 Capacity", "Diff Voltage", "Combined IR", "Similarity Score"
     )
     print(pair_header)
     print("-" * len(pair_header))
 
+    battery_capacity = float('inf')
     for idx, segment in enumerate(segments):
         for pair in segment.cell_pairs:
-            line = "{:<10} {:<15} {:<15} {:<10} {:<15} {:<15} {:<15} {:<15} {:<25} {:<15} {:<15}".format(
+            line = "{:<10} {:<10} {:<15} {:<15} {:<15} {:<10} {:<15} {:<15} {:<15} {:<25} {:<15} {:<15}".format(
                 f"{idx + 1}",
+                f"{pair.pair_number}",
                 f"{pair.cell1.number}-{pair.cell2.number}",
-                f"{pair.cell1.voltage} mV", f"{pair.cell1.ir} mOhm",
-                f"{pair.cell1.capacity} mAh", f"{pair.cell2.voltage} mV",
-                f"{pair.cell2.ir} mOhm", f"{pair.cell2.capacity} mAh",
-                f"{pair.diff_voltage} mV", f"{pair.total_resistance:.2f} mOhm",
+                f"{pair.cell1.voltage}mV", f"{pair.cell1.ir}Ω",
+                f"{pair.cell1.capacity}mAh", f"{pair.cell2.voltage}mV",
+                f"{pair.cell2.ir}Ω", f"{pair.cell2.capacity}mAh",
+                f"{pair.diff_voltage}mV", f"{pair.total_resistance:.2f}Ω",
                 f"{pair.similarity_score}"
             )
             print(line)
 
-        # Uppdaterad "footer" med total kapacitet, total resistans och genomsnittlig IR-differens
         segment_footer = "\nSegment Total Capacity: {} mAh\nSegment Total Resistance: {:.2f} mOhm\nAverage IR Difference: {:.2f} mOhm".format(
             segment.segment_total_capacity, segment.segment_total_resistance, segment.average_ir_difference
         )
         print(segment_footer)
-        print("-" * len(pair_header))  # Separates segments
+        print("-" * len(pair_header))
+
+        battery_capacity = min(battery_capacity, segment.segment_total_capacity)
+
+    print(f'Battery capacity: {battery_capacity}mAh')
+    print("-" * len(pair_header))
+
 
 def write_to_file(segments, spairssegment, filename="output.txt"):
-    with open(filename, "w") as file:
+    with open(filename, "w", encoding='utf-8') as file:
         def write_segment_data(segment):
             file.write("Segments:\n")
             header = "{:<10} {:<15} {:<15} {:<10} {:<15} {:<15} {:<15} {:<15} {:<25} {:<15} {:<15}\n".format(
-                "Segment", "Cell Pair", "Cell 1 Voltage", "Cell 1 IR",
+                "Segment", "Pair Number", "Cell Pair", "Cell 1 Voltage", "Cell 1 IR",
                 "Cell 1 Capacity", "Cell 2 Voltage", "Cell 2 IR",
                 "Cell 2 Capacity", "Diff Voltage", "Combined IR", "Similarity Score"
             )
@@ -245,50 +298,53 @@ def write_to_file(segments, spairssegment, filename="output.txt"):
                 for pair in seg.cell_pairs:
                     line = "{:<10} {:<15} {:<15} {:<10} {:<15} {:<15} {:<15} {:<15} {:<25} {:<15} {:<15}\n".format(
                         f"{idx + 1}",
+                        f"{pair.pair_number}",
                         f"{pair.cell1.number}-{pair.cell2.number}",
-                        f"{pair.cell1.voltage} mV", f"{pair.cell1.ir} mOhm",
-                        f"{pair.cell1.capacity} mAh", f"{pair.cell2.voltage} mV",
-                        f"{pair.cell2.ir} mOhm", f"{pair.cell2.capacity} mAh",
-                        f"{pair.diff_voltage} mV", f"{pair.total_resistance:.2f} mOhm",
+                        f"{pair.cell1.voltage}mV", f"{pair.cell1.ir}Ω",
+                        f"{pair.cell1.capacity}mAh", f"{pair.cell2.voltage}mV",
+                        f"{pair.cell2.ir}Ω", f"{pair.cell2.capacity}mAh",
+                        f"{pair.diff_voltage}mV", f"{pair.total_resistance:.2f}Ω",
                         f"{pair.similarity_score}"
                     )
                     file.write(line)
 
-                # Skriv ut totala och genomsnittliga värden för segmentet
                 segment_footer = "\nSegment Total Capacity: {} mAh\nSegment Total Resistance: {:.2f} mOhm\nAverage IR Difference: {:.2f} mOhm\n".format(
                     seg.segment_total_capacity, seg.segment_total_resistance, seg.average_ir_difference
                 )
                 file.write(segment_footer)
-                file.write("-" * len(header) + "\n")  # Avskiljare mellan segment
+                file.write("-" * len(header) + "\n")
 
         write_segment_data(segments)
         if spairssegment:
             file.write("Spare Pairs Segment:\n")
             write_segment_data(spairssegment)
+
 def write_segments_to_excel(segments, spairssegment, filename="output_segments.xlsx"):
+    import pandas as pd  # Ensure pandas is imported
+
     def prepare_segment_data_for_excel(segments):
         data = []
         for idx, segment in enumerate(segments):
             for pair in segment.cell_pairs:
                 row = [
                     f"Segment {idx + 1}",
+                    f"{pair.pair_number}",
                     f"{pair.cell1.number}-{pair.cell2.number}",
-                    f"{pair.cell1.voltage}",
-                    f"{pair.cell1.ir}",
-                    f"{pair.cell1.capacity}",
-                    f"{pair.cell2.voltage}",
-                    f"{pair.cell2.ir}",
-                    f"{pair.cell2.capacity}",
-                    segment.average_ir_difference,
-                    f"{segment.segment_total_resistance:.2f}",
-                    f"{segment.segment_total_capacity}"
+                    pair.cell1.voltage, pair.cell1.ir,
+                    pair.cell1.capacity, pair.cell2.voltage,
+                    pair.cell2.ir, pair.cell2.capacity,
+                    pair.diff_voltage, pair.total_resistance,
+                    pair.similarity_score
                 ]
                 data.append(row)
         return data
+
     all_data = prepare_segment_data_for_excel(segments) + prepare_segment_data_for_excel(spairssegment)
-    df = pd.DataFrame(all_data, columns=["Segment", "Cell Pair", "Cell 1 Voltage", "Cell 1 IR", "Cell 1 Capacity",
-                                         "Cell 2 Voltage", "Cell 2 IR", "Cell 2 Capacity", "Average IR Difference",
-                                         "Total Resistance", "Total Capacity"])
+    df = pd.DataFrame(all_data, columns=[
+        "Segment", "Pair Number", "Cell Pair", "Cell 1 Voltage", "Cell 1 IR",
+        "Cell 1 Capacity", "Cell 2 Voltage", "Cell 2 IR", "Cell 2 Capacity",
+        "Diff Voltage", "Combined IR", "Similarity Score"
+    ])
 
     df.to_excel(filename, index=False)
 
@@ -300,9 +356,9 @@ def main():
     cells, extra_cells = remove_low_capacity_cells(cells, num_segments, num_pairs_per_segment)
     ###
     high_ir_pairs = pair_cells_based_on_ir(cells)
-    segments = create_segments_sorted_by_ir(high_ir_pairs, num_pairs_per_segment)
+    segments = create_segments_with_diversity_and_high_ir(high_ir_pairs, num_pairs_per_segment)
     paired_extra_cells = pair_extra_cells(extra_cells)
-    spairssegment = create_segments_sorted_by_ir(paired_extra_cells, num_pairs_per_segment)
+    spairssegment = create_segments_with_diversity_and_high_ir(paired_extra_cells, num_pairs_per_segment)
     print_segments(segments)
     print_segments(spairssegment)
     write_to_file(segments, spairssegment)
