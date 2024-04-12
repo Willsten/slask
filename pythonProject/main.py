@@ -114,7 +114,6 @@ def remove_low_capacity_cells(cells, num_segments, num_pairs_per_segment):
 
 def pair_extra_cells(cells, starting_pair_number=1):
     paired_cells = []
-    # Assuming starting_pair_number is correctly calculated before this function is called
     pair_number = starting_pair_number
 
     while len(cells) > 1:
@@ -131,7 +130,7 @@ def pair_extra_cells(cells, starting_pair_number=1):
             new_pair = CellPair(cell1, cell2)
             new_pair.pair_number = pair_number
             paired_cells.append(new_pair)
-            pair_number += 1  # Increment the pair_number for the next pair
+            pair_number += 1
 
     return paired_cells
 
@@ -149,7 +148,7 @@ def pair_cells_based_on_ir(cells):
             if i != j and cell2 not in paired_cells:
                 difference_ir = abs(cell1.ir - cell2.ir)
                 difference_mV = abs(cell1.voltage-cell2.voltage)
-                if difference_ir < min_difference_ir and difference_mV < 4:
+                if difference_ir < min_difference_ir and difference_mV < 3:
                     min_difference_ir = difference_ir
                     best_pair = CellPair(cell1, cell2)
 
@@ -164,53 +163,62 @@ def pair_cells_based_on_ir(cells):
 
 def sort_diversity_stack(diversity_cells):
     sorted_stack = sorted(diversity_cells, key=lambda x: (
-        x.voltage_difference,  # Sortera efter spänningsskillnad
-        x.ir_difference,       # Sedan efter intern resistansskillnad
-        x.capacity_difference  # Slutligen efter kapacitetsskillnad
-    ), reverse=True)  # Sortera i omvänd ordning för att maximera olikheter
+        x.voltage_difference,
+        x.ir_difference,
+        x.capacity_difference
+    ), reverse=True)
     return sorted_stack
 
 def Segment_pairing_solution(cell_pairs, num_pairs_per_segment):
     pairs_final_sorted = []
     segments = []
     pairs_sorted_on_ir = sorted(cell_pairs, key=lambda x: x.total_resistance)
-    pairs_sorted_on_diversety = sort_diversity_stack(cell_pairs)
+    pairs_sorted_on_diversity = sort_diversity_stack(cell_pairs)
     high_ir_pairs = Stack()
-    diversty_pairs = Stack()
-    for i in pairs_sorted_on_ir:
-        high_ir_pairs.push(i)
-    for i in pairs_sorted_on_diversety:
-        diversty_pairs.push(i)
+    diversity_pairs = Stack()
 
-    while True:
-        if diversty_pairs.isEmpty():
-            break
-        add1 = diversty_pairs.pop()
-        if diversty_pairs.isEmpty():
-            break
-        add2 = diversty_pairs.pop()
-        if diversty_pairs.isEmpty():
-            break
-        add3= high_ir_pairs.pop()
-        if add1 not in pairs_final_sorted:
+    for pair in pairs_sorted_on_ir:
+        high_ir_pairs.push(pair)
+
+    for pair in pairs_sorted_on_diversity:
+        diversity_pairs.push(pair)
+
+    while not (high_ir_pairs.isEmpty() and diversity_pairs.isEmpty()):
+        if not diversity_pairs.isEmpty():
+            add1 = diversity_pairs.pop()
+            if not diversity_pairs.isEmpty():
+                add2 = diversity_pairs.pop()
+            else:
+                add2 = None
+        else:
+            add1 = add2 = None
+
+        if not high_ir_pairs.isEmpty():
+            add3 = high_ir_pairs.pop()
+        else:
+            add3 = None
+
+        if add1 and add1 not in pairs_final_sorted:
             pairs_final_sorted.append(add1)
-        if add2 not in pairs_final_sorted:
+        if add2 and add2 not in pairs_final_sorted:
             pairs_final_sorted.append(add2)
-        if add3 not in pairs_final_sorted:
+        if add3 and add3 not in pairs_final_sorted:
             pairs_final_sorted.append(add3)
 
     for i in range(0, len(pairs_final_sorted), num_pairs_per_segment):
         segment_pairs = pairs_final_sorted[i:i + num_pairs_per_segment]
         segment = Segment(segment_pairs)
         segments.append(segment)
-        segments.sort(key=lambda segment: segment.segment_total_resistance, reverse=True)
+
+    segments.sort(key=lambda segment: segment.segment_total_resistance, reverse=True)
+
     return segments
 
 def print_segments(segments):
     pair_header = "{:<10} {:<10} {:<15} {:<15} {:<15} {:<10} {:<15} {:<15} {:<15} {:<25} {:<15} {:<15}".format(
-        "Segment", "Pair Number", "Cell Pair", "Cell 1 Voltage", "Cell 1 IR",
-        "Cell 1 Capacity", "Cell 2 Voltage", "Cell 2 IR",
-        "Cell 2 Capacity", "Diff Voltage", "Combined IR", "Similarity Score"
+        "Segment", "Pair Nr", "Cell Pair", "Cell 1 V", "Cell 1 IR",
+        "Cell 1 mAh", "Cell 2 V", "Cell 2 IR",
+        "Cell 2 mAh", "Diff Voltage", "Combined IR", "Similarity Score"
     )
     print(pair_header)
     print("-" * len(pair_header))
@@ -279,8 +287,6 @@ def write_to_file(segments, spairssegment, filename="output.txt"):
             write_segment_data(spairssegment)
 
 def write_segments_to_excel(segments, spairssegment, filename="output_segments.xlsx"):
-    import pandas as pd  # Ensure pandas is imported
-
     def prepare_segment_data_for_excel(segments):
         data = []
         for idx, segment in enumerate(segments):
