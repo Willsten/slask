@@ -12,10 +12,10 @@ class CellPair:
         self.cell1 = cell1
         self.cell2 = cell2
         self.similarity_score = self.calculate_similarity()
-        self.total_capacity = self.total_capacity()
-        self.total_resistance = self.total_resistance()
-        self.total_voltage = self.total_voltage()
-        self.diff_voltage = self.diff_voltage()
+        self.total_capacity = self.calculate_total_capacity()
+        self.total_resistance = self.calculate_total_resistance()
+        self.total_voltage = self.calculate_total_voltage()
+        self.voltage_difference = self.calculate_voltage_difference()
 
     def calculate_similarity(self):
         voltage_diff = abs(self.cell1.voltage - self.cell2.voltage)
@@ -23,25 +23,26 @@ class CellPair:
         capacity_diff = abs(self.cell1.capacity - self.cell2.capacity)
         return voltage_diff + resistance_diff + capacity_diff
 
-    def total_capacity(self):
+    def calculate_voltage_difference(self):
+        voltage_diff = abs(self.cell1.voltage - self.cell2.voltage)
+        return voltage_diff
+
+    def calculate_total_capacity(self):
         if self.cell1 and self.cell2 is not None:
             total = self.cell1.capacity + self.cell2.capacity
         return total
 
-    def total_resistance(self):
+    def calculate_total_resistance(self):
         if self.cell1 and self.cell2 is not None:
             total = 1 / ((1 / self.cell1.ir) + (1 / self.cell2.ir))
         return total
-    def total_voltage(self):
-        if self.cell1.voltage < self.cell2.voltage:
-            total_voltage= self.cell1.voltage
-        else:
-            total_voltage= self.cell2.voltage
-        return total_voltage
 
-    def diff_voltage(self):
-        voltage_diff = abs(self.cell1.voltage - self.cell2.voltage)
-        return voltage_diff
+    def calculate_total_voltage(self):
+        if self.cell1.voltage < self.cell2.voltage:
+            total_voltage = self.cell1.voltage
+        else:
+            total_voltage = self.cell2.voltage
+        return total_voltage
 
 class Segment:
     def __init__(self, cell_pairs):
@@ -49,7 +50,7 @@ class Segment:
         self.segment_total_resistance = self.calculate_segment_total_resistance()
         self.segment_total_capacity = self.calculate_segment_total_capacity()
         self.average_ir_difference = self.calculate_average_ir_difference()
-        self.max_voltage_difference = self.max_voltage_difference()
+        self.max_voltage_difference = self.calculate_max_voltage_difference()
     def calculate_segment_total_capacity(self):
         capacity = float("inf")
         for pair in self.cell_pairs:
@@ -70,8 +71,27 @@ class Segment:
             abs(pair.cell1.ir - pair.cell2.ir) for pair in self.cell_pairs if pair.cell1 and pair.cell2)
         return total_ir_difference / len(self.cell_pairs)
 
-    def max_voltage_difference(self):
-        return max(pair.diff_voltage for pair in self.cell_pairs) if self.cell_pairs else 0
+    def calculate_max_voltage_difference(self):
+        return max(pair.voltage_difference for pair in self.cell_pairs) if self.cell_pairs else 0
+
+class Stack:
+    def __init__(self):
+        self.items = []
+
+    def isEmpty(self):
+        return self.items == []
+
+    def push(self, item):
+        self.items.append(item)
+
+    def pop(self):
+        return self.items.pop()
+
+    def peek(self):
+        return self.items[-1]
+
+    def size(self):
+        return len(self.items)
 
 def read_csv_file(file_path):
     df = pd.read_csv(file_path, usecols=[1, 4, 5, 6], skiprows=1)
@@ -230,24 +250,32 @@ def score_cell_pairs(cell_pairs, means):
             pair.total_capacity - means[2])
         scores.append((score, pair))
     return scores
+def sort_diversity_stack(diversity_cells):
+    sorted_stack = sorted(diversity_cells, key=lambda x: (x.voltage_difference, x.total_capacity, x.total_resistance), reverse=True)
+    return sorted_stack
+
 def test(cell_pairs, num_pairs_per_segment):
-    pairs_sorted_on_ir = sorted(cell_pairs, key=lambda x: x.total_resistance, reverse=True)
     pairs_final_sorted = []
     segments = []
-    for i in range(0, len(cell_pairs), num_pairs_per_segment):
-        # Select a subset of cell pairs for this segment.
-        segment_pairs = cell_pairs[i:i + num_pairs_per_segment]
+    pairs_sorted_on_ir = sorted(cell_pairs, key=lambda x: x.total_resistance)
+    pairs_sorted_on_diversety = sort_diversity_stack(cell_pairs)
+    high_ir_pairs = Stack()
+    diversty_pairs = Stack()
+    for i in pairs_sorted_on_ir:
+        high_ir_pairs.push(i)
+    for i in pairs_sorted_on_diversety:
+        diversty_pairs.push(i)
 
-        # Calculate mean attributes and score cell pairs based on diversity.
-        means = calculate_mean_attributes(segment_pairs)
-        scored_pairs = score_cell_pairs(segment_pairs, means)
-        scored_pairs.sort(key=lambda x: x[0], reverse=True)
     while True:
-        if scored_pairs:
-            return False
-        add1 = scored_pairs.pop()
-        add2 = scored_pairs.pop()
-        add3= pairs_sorted_on_ir.pop()
+        if diversty_pairs.isEmpty():
+            break
+        add1 = diversty_pairs.pop()
+        if diversty_pairs.isEmpty():
+            break
+        add2 = diversty_pairs.pop()
+        if diversty_pairs.isEmpty():
+            break
+        add3= high_ir_pairs.pop()
         if add1 not in pairs_final_sorted:
             pairs_final_sorted.append(add1)
         if add2 not in pairs_final_sorted:
@@ -259,6 +287,7 @@ def test(cell_pairs, num_pairs_per_segment):
         segment_pairs = pairs_final_sorted[i:i + num_pairs_per_segment]
         segment = Segment(segment_pairs)
         segments.append(segment)
+        segments.sort(key=lambda segment: segment.segment_total_resistance, reverse=True)
     return segments
 
 def create_segments_with_diversity_and_high_ir(cell_pairs, num_pairs_per_segment):
@@ -323,7 +352,7 @@ def print_segments(segments):
                 f"{pair.cell1.voltage}mV", f"{pair.cell1.ir}Ω",
                 f"{pair.cell1.capacity}mAh", f"{pair.cell2.voltage}mV",
                 f"{pair.cell2.ir}Ω", f"{pair.cell2.capacity}mAh",
-                f"{pair.diff_voltage}mV", f"{pair.total_resistance:.2f}Ω",
+                f"{pair.voltage_difference}mV", f"{pair.total_resistance:.2f}Ω",
                 f"{pair.similarity_score}"
             )
             print(line)
@@ -354,14 +383,14 @@ def write_to_file(segments, spairssegment, filename="output.txt"):
 
             for idx, seg in enumerate(segment):
                 for pair in seg.cell_pairs:
-                    line = "{:<10} {:<15} {:<15} {:<10} {:<15} {:<15} {:<15} {:<15} {:<25} {:<15} {:<15}\n".format(
+                    line = "{:<10} {:<15} {:<15} {:<10} {:<15} {:<15} {:<15} {:<15} {:<15} {:<25} {:<15} {:<15}\n".format(
                         f"{idx + 1}",
                         f"{pair.pair_number}",
                         f"{pair.cell1.number}-{pair.cell2.number}",
                         f"{pair.cell1.voltage}mV", f"{pair.cell1.ir}Ω",
                         f"{pair.cell1.capacity}mAh", f"{pair.cell2.voltage}mV",
                         f"{pair.cell2.ir}Ω", f"{pair.cell2.capacity}mAh",
-                        f"{pair.diff_voltage}mV", f"{pair.total_resistance:.2f}Ω",
+                        f"{pair.voltage_difference}mV", f"{pair.total_resistance:.2f}Ω",
                         f"{pair.similarity_score}"
                     )
                     file.write(line)
@@ -377,6 +406,7 @@ def write_to_file(segments, spairssegment, filename="output.txt"):
             file.write("Spare Pairs Segment:\n")
             write_segment_data(spairssegment)
 
+
 def write_segments_to_excel(segments, spairssegment, filename="output_segments.xlsx"):
     import pandas as pd  # Ensure pandas is imported
 
@@ -391,7 +421,7 @@ def write_segments_to_excel(segments, spairssegment, filename="output_segments.x
                     pair.cell1.voltage, pair.cell1.ir,
                     pair.cell1.capacity, pair.cell2.voltage,
                     pair.cell2.ir, pair.cell2.capacity,
-                    pair.diff_voltage, pair.total_resistance,
+                    pair.voltage_difference, pair.total_resistance,
                     pair.similarity_score
                 ]
                 data.append(row)
@@ -415,8 +445,7 @@ def main():
     ###
     high_ir_pairs = pair_cells_based_on_ir(cells)
     paired_extra_cells = pair_extra_cells(extra_cells)
-    test(high_ir_pairs,num_pairs_per_segment)
-    segments = test(high_ir_pairs, num_pairs_per_segment)
+    segments = test(high_ir_pairs,num_pairs_per_segment)
     spairssegment = test(paired_extra_cells, num_pairs_per_segment)
     print_segments(segments)
     print_segments(spairssegment)
