@@ -7,10 +7,8 @@ class Cell:
         self.ir = ir
         self.capacity = capacity
 class CellPair:
-    pair_number_counter = 0
     def __init__(self, cell1, cell2):
-        CellPair.pair_number_counter += 1
-        self.pair_number = CellPair.pair_number_counter
+        self.pair_number = None
         self.cell1 = cell1
         self.cell2 = cell2
         self.similarity_score = self.calculate_similarity()
@@ -18,6 +16,7 @@ class CellPair:
         self.total_resistance = self.total_resistance()
         self.total_voltage = self.total_voltage()
         self.diff_voltage = self.diff_voltage()
+
     def calculate_similarity(self):
         voltage_diff = abs(self.cell1.voltage - self.cell2.voltage)
         resistance_diff = abs(self.cell1.ir - self.cell2.ir)
@@ -99,20 +98,26 @@ def remove_low_capacity_cells(cells, num_segments, num_pairs_per_segment):
     return high_cap_cells, low_cap_cells
 
 
-def pair_extra_cells(cells):
+def pair_extra_cells(cells, starting_pair_number=1):
     paired_cells = []
+    # Assuming starting_pair_number is correctly calculated before this function is called
+    pair_number = starting_pair_number
+
     while len(cells) > 1:
         cell1 = cells.pop(0)
-        best_pair = None
+        best_pair_index = None
         best_diff = float('inf')
         for i, cell2 in enumerate(cells):
             diff = abs(cell1.ir - cell2.ir)
             if diff < best_diff:
-                best_pair = i
+                best_pair_index = i
                 best_diff = diff
-        if best_pair is not None:
-            cell2 = cells.pop(best_pair)
-            paired_cells.append(CellPair(cell1, cell2))
+        if best_pair_index is not None:
+            cell2 = cells.pop(best_pair_index)
+            new_pair = CellPair(cell1, cell2)
+            new_pair.pair_number = pair_number
+            paired_cells.append(new_pair)
+            pair_number += 1  # Increment the pair_number for the next pair
 
     return paired_cells
 
@@ -139,6 +144,8 @@ def pair_cells_based_on_ir(cells):
             paired_cells.add(cell1)
             paired_cells.add(best_pair.cell2)
 
+    for i, pair in enumerate(cell_pairs, start=1):
+        pair.pair_number = i
     return cell_pairs
 def create_segments_based_on_resistance(cell_pairs, num_pairs_per_segment):
     segments = []
@@ -223,26 +230,77 @@ def score_cell_pairs(cell_pairs, means):
             pair.total_capacity - means[2])
         scores.append((score, pair))
     return scores
-
-def create_segments_with_diversity_and_high_ir(cell_pairs, num_pairs_per_segment):
+def test(cell_pairs, num_pairs_per_segment):
     pairs_sorted_on_ir = sorted(cell_pairs, key=lambda x: x.total_resistance, reverse=True)
-
+    pairs_final_sorted = []
     segments = []
     for i in range(0, len(cell_pairs), num_pairs_per_segment):
+        # Select a subset of cell pairs for this segment.
         segment_pairs = cell_pairs[i:i + num_pairs_per_segment]
+
+        # Calculate mean attributes and score cell pairs based on diversity.
         means = calculate_mean_attributes(segment_pairs)
         scored_pairs = score_cell_pairs(segment_pairs, means)
         scored_pairs.sort(key=lambda x: x[0], reverse=True)
+    while True:
+        if scored_pairs:
+            return False
+        add1 = scored_pairs.pop()
+        add2 = scored_pairs.pop()
+        add3= pairs_sorted_on_ir.pop()
+        if add1 not in pairs_final_sorted:
+            pairs_final_sorted.append(add1)
+        if add2 not in pairs_final_sorted:
+            pairs_final_sorted.append(add2)
+        if add3 not in pairs_final_sorted:
+            pairs_final_sorted.append(add3)
+
+    for i in range(0, len(pairs_final_sorted), num_pairs_per_segment):
+        segment_pairs = pairs_final_sorted[i:i + num_pairs_per_segment]
+        segment = Segment(segment_pairs)
+        segments.append(segment)
+    return segments
+
+def create_segments_with_diversity_and_high_ir(cell_pairs, num_pairs_per_segment):
+    # Sort cell pairs by their internal resistance, from highest to lowest.
+    pairs_sorted_on_ir = sorted(cell_pairs, key=lambda x: x.total_resistance, reverse=True)
+    used_high_ir_pairs = set()  # Track used high IR pairs
+
+    segments = []
+    for i in range(0, len(cell_pairs), num_pairs_per_segment):
+        # Select a subset of cell pairs for this segment.
+        segment_pairs = cell_pairs[i:i + num_pairs_per_segment]
+
+        # Calculate mean attributes and score cell pairs based on diversity.
+        means = calculate_mean_attributes(segment_pairs)
+        scored_pairs = score_cell_pairs(segment_pairs, means)
+        scored_pairs.sort(key=lambda x: x[0], reverse=True)
+
+        # Select cell pairs for the segment based on their diversity scores.
         selected_pairs = [pair for _, pair in scored_pairs[:num_pairs_per_segment]]
+
+        # Determine the number of high IR pairs to insert into the segment.
         num_insertions = min(len(selected_pairs) // 3, len(pairs_sorted_on_ir))
         for j in range(num_insertions):
             insert_position = (j + 1) * 4 - 1
-            if insert_position < len(selected_pairs):
-                high_ir_pair = pairs_sorted_on_ir.pop(0)
-                selected_pairs.insert(insert_position, high_ir_pair)
 
+            # Find the next high IR pair not yet used.
+            while pairs_sorted_on_ir and pairs_sorted_on_ir[0] in used_high_ir_pairs:
+                pairs_sorted_on_ir.pop(0)  # Remove already used pairs
+
+            if insert_position < len(selected_pairs) and pairs_sorted_on_ir:
+                high_ir_pair = pairs_sorted_on_ir.pop(0)  # Safely remove the next high IR pair
+
+                # Insert the high IR pair at the calculated position.
+                selected_pairs.insert(insert_position, high_ir_pair)
+                used_high_ir_pairs.add(high_ir_pair)  # Mark this pair as used
+
+        # Create a new Segment with the selected pairs, including the inserted high IR pairs.
         segment = Segment(selected_pairs)
         segments.append(segment)
+
+    # Optionally, sort the segments by total resistance in descending order.
+    segments.sort(key=lambda segment: segment.segment_total_resistance, reverse=True)
 
     return segments
 
@@ -356,9 +414,10 @@ def main():
     cells, extra_cells = remove_low_capacity_cells(cells, num_segments, num_pairs_per_segment)
     ###
     high_ir_pairs = pair_cells_based_on_ir(cells)
-    segments = create_segments_with_diversity_and_high_ir(high_ir_pairs, num_pairs_per_segment)
     paired_extra_cells = pair_extra_cells(extra_cells)
-    spairssegment = create_segments_with_diversity_and_high_ir(paired_extra_cells, num_pairs_per_segment)
+    test(high_ir_pairs,num_pairs_per_segment)
+    segments = test(high_ir_pairs, num_pairs_per_segment)
+    spairssegment = test(paired_extra_cells, num_pairs_per_segment)
     print_segments(segments)
     print_segments(spairssegment)
     write_to_file(segments, spairssegment)
